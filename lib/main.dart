@@ -1,125 +1,176 @@
+//
+// import 'package:flutter/material.dart';
+// import 'package:get/get.dart';
+// import 'package:messengar/app/routes/app_pages.dart';
+// import 'package:messengar/app/routes/app_routes.dart';
+//
+// void main() {
+//   runApp(const MyApp());
+// }
+//
+// class MyApp extends StatelessWidget {
+//   const MyApp({super.key});
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return GetMaterialApp(
+//       debugShowCheckedModeBanner: false,
+//       title: "Messenger App",
+//       initialRoute: AppRoutes.HOME,
+//       getPages: AppPages.routes,
+//       theme: ThemeData(
+//         fontFamily: "Markazi",
+//         scaffoldBackgroundColor: Colors.white
+//       ),
+//     );
+//   }
+// }
+
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
+
 
 void main() {
-  runApp(const MyApp());
+  runApp(GetMaterialApp(home: ChatPage()));
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+// --------------------- Controller ---------------------
+class ChatController extends GetxController {
+  final messageController = TextEditingController();
+  final response = ''.obs;
+  final isLoading = false.obs;
+  StreamSubscription? _streamSub;
 
-  // This widget is the root of your application.
+  final String apiKey = 'sk-c749f16a57214ada8254c3dc5df1a72c'; // ضع مفتاح DeepSeek هنا
+
+  void sendMessage() async {
+    final text = messageController.text.trim();
+
+    if (text.isEmpty || text.length > 400) {
+      Get.snackbar('خطأ', 'الرسالة فارغة أو تجاوزت 400 حرف');
+      return;
+    }
+
+    isLoading.value = true;
+    response.value = '';
+    _streamSub?.cancel();
+
+    final url = Uri.parse('https://api.deepseek.com/v1/chat/completions');
+
+    final request = http.Request('POST', url)
+      ..headers.addAll({
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json',
+      })
+      ..body = jsonEncode({
+        "model": "deepseek-chat",
+        "messages": [
+          {"role": "user", "content": text}
+        ],
+        "stream": true
+      });
+
+    final streamedResponse = await request.send();
+
+    // التأكد أن السيرفر أرجع 200 OK
+    if (streamedResponse.statusCode == 200) {
+      _streamSub = streamedResponse.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen((line) {
+        if (line.startsWith('data:')) {
+          final data = line.substring(5).trim();
+          if (data == '[DONE]') {
+            isLoading.value = false;
+            return;
+          }
+          try {
+            final jsonData = jsonDecode(data);
+            final content = jsonData['choices'][0]['delta']['content'];
+            if (content != null) {
+              response.value += content;
+            }
+          } catch (e) {
+            print("خطأ في فك JSON: $e");
+          }
+        }
+      }, onDone: () {
+        isLoading.value = false;
+      }, onError: (err) {
+        isLoading.value = false;
+        Get.snackbar('خطأ', 'فشل في الاتصال بـ DeepSeek');
+      });
+    } else {
+      print("error ===================00");
+      print(streamedResponse.stream.bytesToString());
+      print(streamedResponse);
+      isLoading.value = false;
+      Get.snackbar('خطأ', 'فشل الاتصال: ${streamedResponse.statusCode}');
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
-    );
+  void onClose() {
+    _streamSub?.cancel();
+    messageController.dispose();
+    super.onClose();
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
+// --------------------- واجهة المستخدم ---------------------
+class ChatPage extends StatelessWidget {
+  final ChatController c = Get.put(ChatController());
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      appBar: AppBar(title: Text('DeepSeek Chat')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+          children: [
+            // مربع النص وزر الإرسال
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: c.messageController,
+                    maxLength: 400,
+                    decoration: InputDecoration(
+                      labelText: 'اكتب رسالتك',
+                      border: OutlineInputBorder(),
+                      counterText: '', // إزالة عداد الأحرف
+                    ),
+                    maxLines: null,
+                  ),
+                ),
+                SizedBox(width: 10),
+                Obx(() => IconButton(
+                  icon: c.isLoading.value
+                      ? CircularProgressIndicator()
+                      : Icon(Icons.send),
+                  onPressed: c.isLoading.value ? null : c.sendMessage,
+                )),
+              ],
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
+            SizedBox(height: 20),
+            // عرض الرد
+            Obx(() => Expanded(
+              child: SingleChildScrollView(
+                child: Text(
+                  c.response.value,
+                  style: TextStyle(fontSize: 16),
+                ),
+              ),
+            )),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
+
